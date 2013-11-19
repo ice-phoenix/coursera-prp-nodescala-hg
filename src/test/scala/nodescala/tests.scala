@@ -1,7 +1,5 @@
 package nodescala
 
-
-
 import scala.language.postfixOps
 import scala.util.{Try, Success, Failure}
 import scala.collection._
@@ -17,13 +15,12 @@ import org.scalatest.junit.JUnitRunner
 @RunWith(classOf[JUnitRunner])
 class NodeScalaSuite extends FunSuite {
 
-  test("A Future should always be created") {
-    val always = Future.always(517)
-
-    assert(Await.result(always, 0 nanos) == 517)
+  test("An always Future should always complete") {
+    val v = 42
+    assert(v == Future.always(v).now)
   }
 
-  test("A Future should never be created") {
+  test("A never Future should never complete") {
     val never = Future.never[Int]
 
     try {
@@ -34,29 +31,39 @@ class NodeScalaSuite extends FunSuite {
     }
   }
 
+  test("A never Future should not be now") {
+    val never = Future.never[Int]
+
+    try {
+      never.now
+      assert(false)
+    } catch {
+      case ex: NoSuchElementException => // ok!
+    }
+  }
+
   test("CancellationTokenSource should allow stopping the computation") {
     val cts = CancellationTokenSource()
     val ct = cts.cancellationToken
     val p = Promise[String]()
 
     async {
-      while (ct.nonCancelled) {
-        // do work
-      }
-
+      while (ct.nonCancelled) {}
       p.success("done")
     }
 
     cts.unsubscribe()
-    assert(Await.result(p.future, 1 second) == "done")
+    assert("done" == Await.result(p.future, 1 second))
   }
 
   class DummyExchange(val request: Request) extends Exchange {
     @volatile var response = ""
     val loaded = Promise[String]()
+
     def write(s: String) {
       response += s
     }
+
     def close() {
       loaded.success(response)
     }
@@ -152,7 +159,3 @@ class NodeScalaSuite extends FunSuite {
   }
 
 }
-
-
-
-
