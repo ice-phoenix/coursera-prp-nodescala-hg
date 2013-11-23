@@ -1,3 +1,4 @@
+import scala.actors.threadpool.TimeUnit
 import scala.language.postfixOps
 import scala.util._
 import scala.util.control.NonFatal
@@ -47,7 +48,7 @@ package object nodescala {
     /** Returns a future with a unit value that is completed after time `t`.
       */
     def delay(t: Duration): Future[Unit] = Future {
-      Await.ready(Future.never[Unit], t)
+      blocking { Thread.sleep(t.toMillis) }
     }
 
     /** Returns a future with user input.
