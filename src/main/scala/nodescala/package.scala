@@ -152,6 +152,7 @@ package object nodescala {
     /** Creates a new `CancellationTokenSource`.
       */
     def apply(): CancellationTokenSource = new CancellationTokenSource {
+      @volatile
       private var cancelled = false
 
       val token = new CancellationToken {
