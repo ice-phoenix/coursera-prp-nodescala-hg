@@ -7,67 +7,86 @@ import ExecutionContext.Implicits.global
 import scala.async.Async.{async, await}
 import scala.collection._
 import scala.collection.JavaConversions._
+import scala.util.{Try, Success, Failure}
 import java.util.concurrent.{Executor, ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue}
-import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import java.net.InetSocketAddress
 
 /** Contains utilities common to the NodeScala© framework.
- */
+  */
 trait NodeScala {
+  self =>
+
   import NodeScala._
 
   def port: Int
 
   def createListener(relativePath: String): Listener
 
-  /** Uses the response object to respond to the write the response back.
-   *  The response should be written back in parts, and the method should
-   *  occasionally check that server was not stopped, otherwise a very long
-   *  response may take very long to finish.
-   *
-   *  @param exchange     the exchange used to write the response back
-   *  @param token        the cancellation token for
-   *  @param body         the response to write back
-   */
-  private def respond(exchange: Exchange, token: CancellationToken, response: Response): Unit = ???
+  /** Writes the response to a given exchange.
+    * The response should be written back in parts, and the method should
+    * occasionally check that the server was not stopped, otherwise a very long
+    * response may take too long to finish.
+    *
+    * @param exchange   the exchange used to write the response back
+    * @param token      the cancellation token
+    * @param response   the response to write back
+    */
+  private def respond(exchange: Exchange, token: CancellationToken, response: Response): Unit = {
+    while (token.nonCancelled && response.hasNext) {
+      exchange.write(response.next())
+    }
+    exchange.close()
+  }
 
   /** A server:
-   *  1) creates and starts an http listener
-   *  2) creates a cancellation token (hint: use one of the `Future` companion methods)
-   *  3) as long as the token is not cancelled and there is a request from the http listener
-   *     asynchronously process that request using the `respond` method
-   *
-   *  @param relativePath   a relative path on which to start listening on
-   *  @param handler        a function mapping a request to a response
-   *  @return               a subscription that can stop the server and all its asynchronous operations *entirely*.
-   */
-  def start(relativePath: String)(handler: Request => Response): Subscription = ???
+    * 1) creates and starts an http listener
+    * 2) creates a cancellation token (hint: use one of the `Future` companion methods)
+    * 3) as long as the token is not cancelled and there is a request from the http listener
+    *    asynchronously process that request using the `respond` method
+    *
+    * @param relativePath   a relative path which to start listening on
+    * @param handler        a function mapping a request to a response
+    * @return               a subscription that can stop the server and all its asynchronous operations *completely*
+    */
+  def start(relativePath: String)(handler: Request => Response): Subscription = {
+    val l = createListener(relativePath)
+    Subscription(
+      l.start(),
+      Future.run() {
+        ct => Future {
+          while (ct.nonCancelled) {
+            l.nextRequest().foreach { req => self.respond(req._2, ct, handler(req._1)) }
+          }
+        }
+      }
+    )
+  }
 
 }
 
 
 object NodeScala {
 
-  /** A request is a multimap of headers, where each header is a key-value pair of strings.
-   */
+  /** A request is a multimap of string headers.
+    */
   type Request = Map[String, List[String]]
 
-  /** A response consists of a potentially long string (e.g. a data file).
-   *  To be able to process this string in parts, the response is encoded
-   *  as an iterator over a subsequences of the response string.
-   */
+  /** A response is a potentially very long string (e.g., a data file).
+    * To be able to process this string in parts, the response is encoded
+    * as an iterator over parts of the response string.
+    */
   type Response = Iterator[String]
 
-  /** Used to write the response to the request.
-   */
-  trait Exchange { 
+  /** An exchange is used to write a response to a request.
+    */
+  trait Exchange {
     /** Writes to the output stream of the exchange.
-     */
+      */
     def write(s: String): Unit
 
-    /** Communicates that the response has ended and that there
-     *  will be no further writes.
-     */
+    /** Signals that the response has ended and that there
+      * will be no further writes.
+      */
     def close(): Unit
 
     def request: Request
@@ -102,19 +121,26 @@ object NodeScala {
     def removeContext(): Unit
 
     /** Given a relative path:
-     *  1) constructs an uncompleted promise
-     *  2) installs an asynchronous request handler using `createContext`
-     *     that completes the promise with a request when it arrives
-     *     and then deregisters itself using `removeContext`
-     *  3) returns the future with the request
-     *
-     *  @param relativePath    the relative path on which we want to listen to requests
-     *  @return                the promise holding the pair of a request and an exchange object
-     */
-    def nextRequest(): Future[(Request, Exchange)] = ???
+      * 1) constructs an uncompleted promise
+      * 2) installs an asynchronous request handler using `createContext`
+      *    that completes the promise with a request when it arrives
+      *    and then unregisters itself using `removeContext`
+      * 3) returns the future with the request
+      *
+      * @return   a promise holding (Request, Exchange) pair
+      */
+    def nextRequest(): Future[(Request, Exchange)] = {
+      val p = Promise[(Request, Exchange)]()
+      createContext(h => {
+        p.complete(Try(h.request, h))
+        removeContext()
+      })
+      p.future
+    }
   }
 
   object Listener {
+
     class Default(val port: Int, val relativePath: String) extends Listener {
       private val s = HttpServer.create(new InetSocketAddress(port), 0)
       private val executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue)
@@ -136,10 +162,11 @@ object NodeScala {
 
       def removeContext() = s.removeContext(relativePath)
     }
+
   }
 
-  /** The standard server implementation.
-   */
+  /** The default server implementation.
+    */
   class Default(val port: Int) extends NodeScala {
     def createListener(relativePath: String) = new Listener.Default(port, relativePath)
   }
