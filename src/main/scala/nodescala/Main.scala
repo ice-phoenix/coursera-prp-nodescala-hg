@@ -9,6 +9,17 @@ import scala.async.Async.{async, await}
 object Main {
 
   def main(args: Array[String]) {
+
+    // Leaking threads test
+    (1 to 60).foreach { i =>
+      val myServer = new NodeScala.Default(8191)
+      val myServerSubscription = myServer.start("/test") {
+        r => r.map(_.toString()).toIterator
+      }
+      Thread.sleep(1000)
+      myServerSubscription.unsubscribe()
+    }
+
     val myServer = new NodeScala.Default(8191)
     val myServerSubscription = myServer.start("/test") {
       r => r.map(_.toString()).toIterator
