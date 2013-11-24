@@ -54,7 +54,7 @@ package object nodescala {
     /** Returns a future with user input.
       */
     def userInput(message: String): Future[String] = Future {
-      readLine(message)
+      blocking { readLine(message) }
     }
 
     /** Creates a cancellable context for the execution, starts it and returns the context.
