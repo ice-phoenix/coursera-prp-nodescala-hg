@@ -32,10 +32,13 @@ trait NodeScala {
     * @param response   the response to write back
     */
   private def respond(exchange: Exchange, token: CancellationToken, response: Response): Unit = {
-    while (token.nonCancelled && response.hasNext) {
-      exchange.write(response.next())
+    try {
+      while (token.nonCancelled && response.hasNext) {
+        exchange.write(response.next())
+      }
+    } finally {
+      exchange.close()
     }
-    exchange.close()
   }
 
   /** A server:
@@ -55,7 +58,8 @@ trait NodeScala {
       Future.run() {
         ct => Future {
           while (ct.nonCancelled) {
-            l.nextRequest().foreach { req => self.respond(req._2, ct, handler(req._1)) }
+            val nextResult = l.nextRequest().map { req => self.respond(req._2, ct, handler(req._1)) }
+            Await.ready(nextResult, Duration.Inf)
           }
         }
       }
