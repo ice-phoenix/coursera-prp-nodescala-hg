@@ -158,7 +158,7 @@ object NodeScala {
     final def nextRequest(): Future[(Request, Exchange)] = {
       val mark = Array.ofDim[Boolean](1)
       val p = activePromise.get(mark)
-      if (mark(0)) { return p.future }
+      if (mark(0)) { return Promise[(Request, Exchange)]().failure(new NoSuchElementException).future }
 
       val p2 = Promise[(Request, Exchange)]()
 
