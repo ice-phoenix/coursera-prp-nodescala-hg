@@ -165,7 +165,11 @@ object NodeScala {
         createContext(h => {
           removeContext()
           p2.tryComplete(Try(h.request, h))
-          activePromise.compareAndSet(p2, null, true, false)
+          if (activePromise.compareAndSet(p2, null, true, false)) {
+            // Ok
+          } else {
+            println("Stopping?")
+          }
         })
         return p2.future
       }
