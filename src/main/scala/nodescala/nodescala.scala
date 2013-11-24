@@ -60,8 +60,9 @@ trait NodeScala {
       Future.run() {
         ct => Future {
           while (ct.nonCancelled) {
-            val nextResult = l.nextRequest().map { req => self.respond(req._2, ct, handler(req._1)) }
-            Await.ready(nextResult, Duration.Inf)
+            val nextRequest = l.nextRequest()
+            Await.ready(nextRequest, Duration.Inf)
+            nextRequest.foreach { req => self.respond(req._2, ct, handler(req._1)) }
           }
         }
       }
