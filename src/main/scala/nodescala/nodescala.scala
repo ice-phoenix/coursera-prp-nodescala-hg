@@ -8,7 +8,6 @@ import ExecutionContext.Implicits.global
 import scala.async.Async.{async, await}
 import scala.collection._
 import scala.collection.JavaConversions._
-import scala.util.{Try, Success, Failure}
 import java.util.concurrent.{Executor, ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue}
 import java.util.concurrent.atomic.AtomicMarkableReference
 import java.net.InetSocketAddress
@@ -166,7 +165,7 @@ object NodeScala {
         createContext(h => {
           removeContext()
           if (activePromise.compareAndSet(p2, null, true, false)) {
-            p2.tryComplete(Try(h.request, h))
+            p2.trySuccess(h.request, h)
           } else {
             println("Stopping?")
           }
