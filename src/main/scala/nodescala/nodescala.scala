@@ -1,6 +1,7 @@
 package nodescala
 
 import com.sun.net.httpserver._
+import scala.annotation.tailrec
 import scala.concurrent._
 import scala.concurrent.duration._
 import ExecutionContext.Implicits.global
@@ -9,6 +10,7 @@ import scala.collection._
 import scala.collection.JavaConversions._
 import scala.util.{Try, Success, Failure}
 import java.util.concurrent.{Executor, ThreadPoolExecutor, TimeUnit, LinkedBlockingQueue}
+import java.util.concurrent.atomic.AtomicMarkableReference
 import java.net.InetSocketAddress
 
 /** Contains utilities common to the NodeScala© framework.
@@ -124,6 +126,24 @@ object NodeScala {
 
     def removeContext(): Unit
 
+    private val activePromise = new AtomicMarkableReference[Promise[(Request, Exchange)]](null, false)
+
+    @tailrec
+    final def stop(): Unit = {
+      val mark = Array.ofDim[Boolean](1)
+      val p = activePromise.get(mark)
+      if (mark(0)) { p.tryFailure(new NoSuchElementException) }
+
+      val p2 = Promise[(Request, Exchange)]()
+
+      if (activePromise.compareAndSet(p, p2, mark(0), true)) {
+        p2.tryFailure(new NoSuchElementException)
+        return
+      }
+
+      stop()
+    }
+
     /** Given a relative path:
       * 1) constructs an uncompleted promise
       * 2) installs an asynchronous request handler using `createContext`
@@ -133,13 +153,24 @@ object NodeScala {
       *
       * @return   a promise holding (Request, Exchange) pair
       */
-    def nextRequest(): Future[(Request, Exchange)] = {
-      val p = Promise[(Request, Exchange)]()
-      createContext(h => {
-        p.complete(Try(h.request, h))
-        removeContext()
-      })
-      p.future
+    @tailrec
+    final def nextRequest(): Future[(Request, Exchange)] = {
+      val mark = Array.ofDim[Boolean](1)
+      val p = activePromise.get(mark)
+      if (mark(0)) { return p.future }
+
+      val p2 = Promise[(Request, Exchange)]()
+
+      if (activePromise.compareAndSet(p, p2, false, true)) {
+        createContext(h => {
+          removeContext()
+          p2.tryComplete(Try(h.request, h))
+          activePromise.compareAndSet(p2, null, true, false)
+        })
+        return p2.future
+      }
+
+      nextRequest()
     }
   }
 
@@ -154,6 +185,7 @@ object NodeScala {
         s.start()
         new Subscription {
           def unsubscribe() = {
+            stop()
             s.stop(0)
             executor.shutdown()
           }
