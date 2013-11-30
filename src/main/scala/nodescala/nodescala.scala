@@ -60,11 +60,12 @@ trait NodeScala {
         ct =>
 
           def process(): Future[Unit] = {
-            if (ct.nonCancelled) return Future()
+            if (ct.isCancelled) return Future{}
 
-            l.nextRequest()
-            .map { req => self.respond(req._2, ct, handler(req._1)) }
-            .continue { _ => process() }
+            val nextRequest = l.nextRequest()
+
+            nextRequest.foreach { case req => self.respond(req._2, ct, handler(req._1)) }
+            nextRequest.continue { _ => process() }
           }
 
           process()
