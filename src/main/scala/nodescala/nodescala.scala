@@ -57,13 +57,18 @@ trait NodeScala {
     Subscription(
       l.start(),
       Future.run() {
-        ct => Future {
-          while (ct.nonCancelled) {
-            val nextRequest = l.nextRequest()
-            Await.ready(nextRequest, Duration.Inf)
-            nextRequest.foreach { req => self.respond(req._2, ct, handler(req._1)) }
+        ct =>
+
+          def process(): Future[Unit] = {
+            if (ct.nonCancelled) return Future()
+
+            l.nextRequest()
+            .map { req => self.respond(req._2, ct, handler(req._1)) }
+            .continue { _ => process() }
           }
-        }
+
+          process()
+
       }
     )
   }
@@ -128,21 +133,25 @@ object NodeScala {
 
     private val activePromise = new AtomicMarkableReference[Promise[(Request, Exchange)]](null, false)
 
+    case object Stopped extends Exception
+
     @tailrec
     final def stop(): Unit = {
       val mark = Array.ofDim[Boolean](1)
       val p = activePromise.get(mark)
-      if (mark(0)) { p.tryFailure(new NoSuchElementException) }
+      if (mark(0)) { p.tryFailure(Stopped) }
 
       val p2 = Promise[(Request, Exchange)]()
 
       if (activePromise.compareAndSet(p, p2, mark(0), true)) {
-        p2.tryFailure(new NoSuchElementException)
+        p2.tryFailure(Stopped)
         return
       }
 
       stop()
     }
+
+    case object HasActiveRequest extends Exception
 
     /** Given a relative path:
       * 1) constructs an uncompleted promise
@@ -157,7 +166,7 @@ object NodeScala {
     final def nextRequest(): Future[(Request, Exchange)] = {
       val mark = Array.ofDim[Boolean](1)
       val p = activePromise.get(mark)
-      if (mark(0)) { return Promise[(Request, Exchange)]().failure(new NoSuchElementException).future }
+      if (mark(0)) { return Promise[(Request, Exchange)]().failure(HasActiveRequest).future }
 
       val p2 = Promise[(Request, Exchange)]()
 
